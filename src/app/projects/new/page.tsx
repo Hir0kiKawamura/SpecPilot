@@ -18,19 +18,43 @@ export default function NewProjectPage() {
   const onSubmit = async (data: FormValues) => {
     setLoading(true);
 
-    const res = await fetch("/api/ai/requirements", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
+    try {
+      // 1. 要件生成APIを呼び出し
+      const res = await fetch("/api/ai/requirements", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
 
-    const json = await res.json();
+      if (!res.ok) {
+        throw new Error("Failed to generate requirements");
+      }
 
-    // 仮：localStorageに保存
-    localStorage.setItem("spec", JSON.stringify(json));
+      const requirements = await res.json();
 
-    setLoading(false);
+      // 2. プロジェクトIDを生成
+      const projectId = crypto.randomUUID();
 
-    router.push("/projects/1");
+      // 3. localStorageに保存
+      const projects = JSON.parse(localStorage.getItem("projects") || "{}");
+      projects[projectId] = {
+        id: projectId,
+        title: data.title,
+        description: data.description,
+        requirements,
+        tests: null,
+        createdAt: new Date().toISOString(),
+      };
+      localStorage.setItem("projects", JSON.stringify(projects));
+
+      // 4. リダイレクト
+      router.push(`/projects/${projectId}`);
+    } catch (error) {
+      console.error("Error:", error);
+      alert("エラーが発生しました");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -38,11 +62,22 @@ export default function NewProjectPage() {
       <h1 className="text-xl font-bold mb-4">要件入力</h1>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-        <input {...register("title")} placeholder="プロジェクト名" className="border p-2 w-full" />
+        <input
+          {...register("title", { required: true })}
+          placeholder="プロジェクト名"
+          className="border p-2 w-full"
+        />
 
-        <textarea {...register("description")} placeholder="やりたいこと" className="border p-2 w-full h-32" />
+        <textarea
+          {...register("description", { required: true })}
+          placeholder="やりたいこと"
+          className="border p-2 w-full h-32"
+        />
 
-        <button className="bg-blue-500 text-white px-4 py-2 rounded">
+        <button
+          disabled={loading}
+          className="bg-blue-500 text-white px-4 py-2 rounded disabled:opacity-50"
+        >
           {loading ? "生成中..." : "AIで要件整理"}
         </button>
       </form>
