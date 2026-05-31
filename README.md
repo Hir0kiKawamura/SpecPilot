@@ -4,6 +4,12 @@ Sler向け設計支援アプリ
 要件定義～単体テスト設計までをサポートします。
 生成AIと伴走することで、設計の質を高めます。
 
+以下にデモがあります。
+https://spec-pilot-xi.vercel.app/
+
+現在はデモのため、要件定義とテストケースのみ生成できます。
+生成は無料枠のみとしておりLocalStorageへの保存となっています。
+
 ------------------------------
 # other
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
