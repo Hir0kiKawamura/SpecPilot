@@ -28,16 +28,26 @@ CSVエクスポート機能
 ### ◆ 画面イメージ
 
 TOP
-![TOP](./screenshot/TOP.png)
+<p align="center">
+  <img src="./screenshot/TOP.png" width="600" />
+</p>
+
+要件入力 → 設計生成 → テストケース生成までを一貫して行えます
 
 新規入力
-![新規入力](./screenshot/input_001.png)
+<p align="center">
+  <img src="./screenshot/input_001.png" width="600" />
+</p>
 
 結果-要件定義
-![結果-要件定義](./screenshot/result_001.png)
+<p align="center">
+  <img src="./screenshot/result_001.png" width="600" />
+</p>
 
 結果-テストケース
-![結果-テストケース](./screenshot/result_002.png)
+<p align="center">
+  <img src="./screenshot/result_002.png" width="600" />
+</p>
 
 ### ◆ 技術スタック
 Next.js
