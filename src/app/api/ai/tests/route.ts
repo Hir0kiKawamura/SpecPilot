@@ -1,11 +1,27 @@
 // src/app/api/ai/tests/route.ts
 import { GoogleGenAI } from "@google/genai";
+import {
+  extractModelText,
+  isTestsResponse,
+  parseModelJson,
+} from "@/lib/ai-validation";
+import {
+  createAiErrorResponse,
+  hasMaxTokensFinishReason,
+} from "@/lib/ai-error-classification";
 
 export const runtime = "edge";
 
 const client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export async function POST(req: Request) {
+  if (!process.env.GEMINI_API_KEY) {
+    return new Response(JSON.stringify({ error: "Missing GEMINI_API_KEY" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   const body = await req.json();
 
   const prompt = `
@@ -38,35 +54,48 @@ ${JSON.stringify(body, null, 2)}
 }
 `;
 
-  const res: unknown = await client.models.generateContent({
-    model: "gemini-3.5-flash",
-    contents: prompt,
-  });
-
-  const extractText = (r: unknown): string => {
-    if (r && typeof r === "object") {
-      const ro = r as Record<string, unknown>;
-      if (typeof ro.text === "string") return ro.text;
-      if (ro.response && typeof ro.response === "object") {
-        const rr = ro.response as Record<string, unknown>;
-        if (typeof rr.text === "string") return rr.text;
-      }
-      if (typeof ro.output_text === "string") return ro.output_text;
-      if (typeof ro.body === "string") return ro.body;
-      return JSON.stringify(r);
-    }
-    return String(r);
-  };
-
-  const textOutput = extractText(res);
+  let res: unknown;
 
   try {
-    const json = JSON.parse(String(textOutput));
-    return new Response(JSON.stringify(json), { headers: { "Content-Type": "application/json" } });
-  } catch (e) {
-    return new Response(JSON.stringify({ error: "JSON parse error", raw: textOutput }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
+    res = await client.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: prompt,
     });
+  } catch (error) {
+    return createAiErrorResponse(error);
+  }
+
+  const textOutput = extractModelText(res);
+  const reachedTokenLimit = hasMaxTokensFinishReason(res);
+
+  try {
+    const json = parseModelJson(textOutput);
+
+    if (reachedTokenLimit) {
+      return new Response(JSON.stringify({ error: "AI_TOKEN_LIMIT" }), {
+        status: 413,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (!isTestsResponse(json)) {
+      return new Response(JSON.stringify({ error: "Invalid tests response" }), {
+        status: 502,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    return new Response(JSON.stringify(json), { headers: { "Content-Type": "application/json" } });
+  } catch {
+    return new Response(
+      JSON.stringify({
+        error: reachedTokenLimit ? "AI_TOKEN_LIMIT" : "JSON parse error",
+        raw: textOutput,
+      }),
+      {
+        status: reachedTokenLimit ? 413 : 500,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
   }
 }
