@@ -1,6 +1,8 @@
 "use client"
 
 import { useEffect, useState, useRef } from "react"
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
+import type { TestCaseType } from "@/lib/ai-validation"
 
 export type TestCase = {
   id: string
@@ -8,18 +10,29 @@ export type TestCase = {
   precondition: string
   steps: string[]
   expected: string
-  type: "normal" | "edge" | "error" | string
+  type: TestCaseType
 }
 
 type Props = {
   initialData: TestCase[]
-  onChange?: (data: TestCase[]) => void
-  onSave?: (data: TestCase[]) => void
+  onChange?: (data: TestCase[]) => Promise<void> | void
+  onSave?: (data: TestCase[]) => Promise<void> | void
 }
+
+type SaveStatus =
+  | "idle"
+  | "draft-saving"
+  | "draft-saved"
+  | "saving"
+  | "saved"
+  | "error"
 
 export function TestCaseTable({ initialData, onChange, onSave }: Props) {
   const [data, setData] = useState<TestCase[]>(initialData)
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle")
+  const [deleteIndex, setDeleteIndex] = useState<number | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const didMountRef = useRef(false)
 
   const adjustTextareas = () => {
     const root = containerRef.current
@@ -40,12 +53,36 @@ export function TestCaseTable({ initialData, onChange, onSave }: Props) {
   // debounce autosave
   // =========================
   useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true
+      return
+    }
+
+    let active = true
+
     const timer = setTimeout(() => {
-      onChange?.(data)
-      localStorage.setItem("testcases", JSON.stringify(data))
+      const saveDraft = async () => {
+        try {
+          setSaveStatus("draft-saving")
+          await onChange?.(data)
+          if (active) {
+            setSaveStatus("draft-saved")
+          }
+        } catch (err) {
+          console.error(err)
+          if (active) {
+            setSaveStatus("error")
+          }
+        }
+      }
+
+      void saveDraft()
     }, 500)
 
-    return () => clearTimeout(timer)
+    return () => {
+      active = false
+      clearTimeout(timer)
+    }
   }, [data, onChange])
 
   // =========================
@@ -54,7 +91,7 @@ export function TestCaseTable({ initialData, onChange, onSave }: Props) {
   const update = (
     index: number,
     key: keyof TestCase,
-    value: string | boolean | string[] | number
+    value: string | string[]
   ) => {
     const copy = [...data]
     copy[index] = { ...copy[index], [key]: value }
@@ -83,14 +120,21 @@ export function TestCaseTable({ initialData, onChange, onSave }: Props) {
   // =========================
   const deleteRow = (index: number) => {
     setData(data.filter((_, i) => i !== index))
+    setDeleteIndex(null)
   }
 
   // =========================
   // save data
   // =========================
-  const save = () => {
-    // call optional onSave handler (project-level save/versioning)
-    onSave?.(data)
+  const save = async () => {
+    try {
+      setSaveStatus("saving")
+      await onSave?.(data)
+      setSaveStatus("saved")
+    } catch (err) {
+      console.error(err)
+      setSaveStatus("error")
+    }
   }
 
   // =========================
@@ -136,22 +180,47 @@ export function TestCaseTable({ initialData, onChange, onSave }: Props) {
   // =========================
   return (
     <div ref={containerRef} className="space-y-3 border rounded-lg p-4 bg-white shadow-sm">
+      {deleteIndex !== null && (
+        <ConfirmDialog
+          title="テストケースを削除しますか？"
+          description={`「${data[deleteIndex]?.title || `ケース ${deleteIndex + 1}`}」を削除します。`}
+          confirmLabel="削除"
+          destructive
+          onCancel={() => setDeleteIndex(null)}
+          onConfirm={() => deleteRow(deleteIndex)}
+        />
+      )}
       {/* toolbar */}
-      <div className="flex gap-2 items-center">
-        <button onClick={addRow} className="px-3 py-1 bg-blue-500 text-white rounded">
-          + Add
-        </button>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="text-sm font-medium text-gray-700">
+            {data.length}件のテストケース
+          </div>
 
-        <button onClick={exportCSV} className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600">
-          Export CSV
-        </button>
+          <div className="text-sm text-gray-500" aria-live="polite">
+            {saveStatus === "idle" && "編集すると自動保存されます"}
+            {saveStatus === "draft-saving" && "下書き保存中..."}
+            {saveStatus === "draft-saved" && "下書き保存済み"}
+            {saveStatus === "saving" && "正式保存中..."}
+            {saveStatus === "saved" && "正式保存済み"}
+            {saveStatus === "error" && (
+              <span className="text-red-600">保存に失敗しました</span>
+            )}
+          </div>
+        </div>
 
-        <button onClick={save} className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700">
-          💾 Save
-        </button>
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+          <button onClick={addRow} className="w-full rounded bg-blue-500 px-3 py-1 text-white sm:w-auto">
+            行を追加
+          </button>
 
-        <div className="text-sm text-gray-500 self-center">
-          {data.length} cases
+          <button onClick={exportCSV} className="w-full rounded bg-green-500 px-3 py-1 text-white hover:bg-green-600 sm:w-auto">
+            CSV出力
+          </button>
+
+          <button onClick={save} className="w-full rounded bg-gray-600 px-3 py-1 text-white hover:bg-gray-700 sm:w-auto">
+            バージョン保存
+          </button>
         </div>
       </div>
 
@@ -234,7 +303,9 @@ export function TestCaseTable({ initialData, onChange, onSave }: Props) {
                   <select
                     className="w-full border px-2 py-1"
                     value={row.type}
-                    onChange={(e) => update(i, "type", e.target.value)}
+                    onChange={(e) =>
+                      update(i, "type", e.target.value as TestCaseType)
+                    }
                   >
                     <option value="normal">normal</option>
                     <option value="edge">edge</option>
@@ -244,16 +315,11 @@ export function TestCaseTable({ initialData, onChange, onSave }: Props) {
 
                 <td className="p-1 text-center">
                   <button
-                    onClick={() => deleteRow(i)}
-                    className="inline-flex items-center gap-2 px-3 py-1 bg-red-600 text-white border border-red-600 hover:bg-red-700 hover:border-red-700 rounded-md transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-red-200"
+                    onClick={() => setDeleteIndex(i)}
+                    className="inline-flex items-center px-3 py-1 bg-red-600 text-white border border-red-600 hover:bg-red-700 hover:border-red-700 rounded-md transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-red-200"
                     aria-label={`削除: ${row.title || `ケース ${i + 1}`}`}
                     title="削除"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="w-4 h-4" aria-hidden="true">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M3 6h18" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M8 6v14a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V6" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M10 11v6M14 11v6" />
-                    </svg>
                     <span className="text-sm font-semibold">削除</span>
                   </button>
                 </td>
